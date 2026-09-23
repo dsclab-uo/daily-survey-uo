@@ -11,7 +11,7 @@ const CONFIG = {
   STUDY_LENGTH_DAYS: 30,
 
   // Times of day surveys are triggered (24h "HH:MM", local time).
-  SURVEY_TIMES: ["12:00", "20:00"],
+  SURVEY_TIMES: ["12:00", "17:00"],
 
   // How many times a snoozed notification will re-fire, and how
   // far apart (minutes), before it stops repeating for that occasion.
