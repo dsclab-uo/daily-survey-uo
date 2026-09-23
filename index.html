@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Daily Survey</title>
+<meta name="theme-color" content="#2563eb" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Daily Survey" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ============ SETUP SCREEN ============ -->
+  <section id="screen-setup" class="screen">
+    <div class="card">
+      <h1>Study Setup</h1>
+      <p class="muted">This only needs to be done once, on your own phone.</p>
+
+      <label for="participantId">Participant ID</label>
+      <input id="participantId" type="text" inputmode="text" autocomplete="off" placeholder="e.g. P-1042" />
+
+      <label for="wakeTime">What time do you usually wake up?</label>
+      <input id="wakeTime" type="time" value="07:00" />
+
+      <label for="sleepTime">What time do you usually go to sleep?</label>
+      <input id="sleepTime" type="time" value="23:00" />
+
+      <p class="muted small">We use these so surveys never notify you during your normal sleep hours.</p>
+
+      <button id="btnStartStudy" class="btn-primary">Start Study</button>
+      <p id="setupError" class="error"></p>
+    </div>
+  </section>
+
+  <!-- ============ HOME SCREEN ============ -->
+  <section id="screen-home" class="screen hidden">
+    <div class="card">
+      <h1>Daily Survey</h1>
+      <p class="muted" id="dayCounter">Day 1 of 30</p>
+
+      <div id="notifPermBanner" class="banner hidden">
+        Notifications are turned off. <button id="btnEnableNotif" class="btn-link">Turn on</button>
+      </div>
+
+      <div id="offlineBanner" class="banner hidden">
+        Offline — responses are saved on your phone and will upload automatically once you're back online.
+      </div>
+
+      <div class="status-block">
+        <h2>Today</h2>
+        <ul id="todayStatus" class="status-list"></ul>
+      </div>
+
+      <button id="btnTakeSurvey" class="btn-primary hidden">Take Survey Now</button>
+
+      <div id="completeBlock" class="hidden">
+        <p>🎉 The 30-day study period is complete. Thank you for participating!</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SURVEY SCREEN ============ -->
+  <section id="screen-survey" class="screen hidden">
+    <div class="card">
+      <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+      <form id="surveyForm"></form>
+    </div>
+  </section>
+
+  <!-- ============ THANK YOU SCREEN ============ -->
+  <section id="screen-done" class="screen hidden">
+    <div class="card center">
+      <h1>Thanks!</h1>
+      <p>Your responses have been saved.</p>
+      <button id="btnBackHome" class="btn-primary">Back to Home</button>
+    </div>
+  </section>
+
+</div>
+
+<script src="config.js"></script>
+<script src="db.js"></script>
+<script src="survey-items.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
