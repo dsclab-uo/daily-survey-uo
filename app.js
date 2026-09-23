@@ -41,6 +41,26 @@ function show(id) {
 // ---------- init ----------
 window.addEventListener("load", init);
 
+// Catch "beforeinstallprompt" as early as possible — Chrome can dispatch this
+// before the window "load" event fires, so waiting for load can miss it entirely.
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  showAndroidInstallBanner();
+});
+
+// When a new service worker takes over (i.e. a redeploy was picked up),
+// reload once so the page is running the current JS/CSS instead of
+// whatever was in memory from before the update.
+let swRefreshing = false;
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (swRefreshing) return;
+    swRefreshing = true;
+    window.location.reload();
+  });
+}
+
 async function init() {
   if ("serviceWorker" in navigator) {
     try {
@@ -131,43 +151,57 @@ function isIOSDevice() {
   return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
 }
 
-function setupInstallBanner() {
-  if (isStandaloneDisplay()) return; // already installed — nothing to prompt
-  if (localStorage.getItem(INSTALL_DISMISS_KEY) === "1") return;
-
+function wireDismissButton() {
   const banner = document.getElementById("installBanner");
-  const textEl = document.getElementById("installBannerText");
-  const actionBtn = document.getElementById("btnInstallAction");
   const dismissBtn = document.getElementById("btnDismissInstall");
-
   dismissBtn.onclick = () => {
     localStorage.setItem(INSTALL_DISMISS_KEY, "1");
     banner.classList.add("hidden");
   };
+}
+
+function showAndroidInstallBanner() {
+  if (isStandaloneDisplay()) return;
+  if (localStorage.getItem(INSTALL_DISMISS_KEY) === "1") return;
+  const banner = document.getElementById("installBanner");
+  const textEl = document.getElementById("installBannerText");
+  const actionBtn = document.getElementById("btnInstallAction");
+  if (!banner) return; // DOM not ready — shouldn't happen since this script tag is after the banner markup
+
+  textEl.textContent = "Install this app to your home screen so reminders work reliably.";
+  actionBtn.classList.remove("hidden");
+  banner.classList.remove("hidden");
+  wireDismissButton();
+  actionBtn.onclick = async () => {
+    banner.classList.add("hidden");
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+    }
+  };
+}
+
+function setupInstallBanner() {
+  if (isStandaloneDisplay()) return; // already installed — nothing to prompt
+  if (localStorage.getItem(INSTALL_DISMISS_KEY) === "1") return;
 
   if (isIOSDevice()) {
     // iOS has no programmatic install prompt — show instructions instead.
+    const banner = document.getElementById("installBanner");
+    const textEl = document.getElementById("installBannerText");
+    const actionBtn = document.getElementById("btnInstallAction");
     textEl.textContent = 'Add this app to your Home Screen for reminders to work: tap the Share icon, then "Add to Home Screen".';
     actionBtn.classList.add("hidden");
     banner.classList.remove("hidden");
-  } else {
-    // Chrome/Android etc. fire this event when the app is installable.
-    window.addEventListener("beforeinstallprompt", (e) => {
-      e.preventDefault();
-      deferredInstallPrompt = e;
-      textEl.textContent = "Install this app to your home screen so reminders work reliably.";
-      actionBtn.classList.remove("hidden");
-      banner.classList.remove("hidden");
-      actionBtn.onclick = async () => {
-        banner.classList.add("hidden");
-        if (deferredInstallPrompt) {
-          deferredInstallPrompt.prompt();
-          await deferredInstallPrompt.userChoice;
-          deferredInstallPrompt = null;
-        }
-      };
-    });
+    wireDismissButton();
+  } else if (deferredInstallPrompt) {
+    // The "beforeinstallprompt" event (registered at the top of this file,
+    // before window "load") may already have fired by the time we get here.
+    showAndroidInstallBanner();
   }
+  // If deferredInstallPrompt hasn't arrived yet on non-iOS, the top-level
+  // listener will call showAndroidInstallBanner() itself once it does.
 }
 
 window.addEventListener("appinstalled", () => {

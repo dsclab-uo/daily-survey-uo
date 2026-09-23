@@ -4,7 +4,7 @@
 // - handles notification clicks (open app / snooze)
 // - best-effort periodic background sync (Android Chrome only)
 // ============================================================
-const CACHE_NAME = "daily-survey-v1";
+const CACHE_NAME = "daily-survey-v2";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -34,8 +34,18 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  // Network-first: always try to get the latest file when online (so a
+  // redeploy shows up immediately), falling back to the cached copy when
+  // offline. This trades a little offline-purity for freshness, which
+  // matters more here since the app gets iterated on.
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request).catch(() => cached))
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
 
