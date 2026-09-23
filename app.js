@@ -134,10 +134,19 @@ function wireSetupScreen() {
       try { await Notification.requestPermission(); } catch (e) {}
     }
 
-    show("screen-home");
-    await renderHome();
-    checkSchedule();
     setInterval(checkSchedule, CONFIG.CHECK_INTERVAL_MS);
+
+    // Take the participant straight into their first survey, regardless of
+    // time of day — the noon/8pm gating only applies from here on out.
+    const config = await DB.getConfig();
+    const { dueOccasion } = await computeTodayStatus(config);
+    if (dueOccasion) {
+      startSurvey(dueOccasion);
+    } else {
+      show("screen-home");
+      await renderHome();
+    }
+    checkSchedule();
   });
 }
 
@@ -212,6 +221,43 @@ window.addEventListener("appinstalled", () => {
 // ============================================================
 // HOME SCREEN
 // ============================================================
+
+// Works out, for "today", which occasions are done/available/waiting.
+// If the participant has never submitted any response yet, the first
+// not-yet-completed occasion is made available immediately regardless
+// of the scheduled time, so day-1 setup doesn't force a wait until noon/8pm.
+async function computeTodayStatus(config) {
+  const today = isoDate(new Date());
+  const wakeMin = toMinutes(config.wakeTime);
+  const sleepMin = toMinutes(config.sleepTime);
+  const responses = await DB.getResponsesForDate(today);
+  const allResponses = await DB.getAllResponses();
+  const isFirstEver = allResponses.length === 0;
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+
+  let dueOccasion = null;
+  const rows = CONFIG.SURVEY_TIMES.map((occasion) => {
+    const done = responses.some((r) => r.occasion === occasion);
+    const adjMin = adjustedTriggerMinute(toMinutes(occasion), wakeMin, sleepMin);
+    let state;
+    if (done) {
+      state = "done";
+    } else if (nowMin >= adjMin) {
+      state = "pending";
+      if (!dueOccasion) dueOccasion = occasion;
+    } else if (isFirstEver && !dueOccasion) {
+      // Bypass the time gate for the participant's very first survey.
+      state = "pending";
+      dueOccasion = occasion;
+    } else {
+      state = "waiting";
+    }
+    return { occasion, done, adjMin, state };
+  });
+
+  return { rows, dueOccasion, isFirstEver };
+}
+
 async function renderHome() {
   const config = await DB.getConfig();
   const today = isoDate(new Date());
@@ -232,24 +278,17 @@ async function renderHome() {
     completeBlock.classList.add("hidden");
     document.querySelector(".status-block").classList.remove("hidden");
 
-    const wakeMin = toMinutes(config.wakeTime);
-    const sleepMin = toMinutes(config.sleepTime);
-    const responses = await DB.getResponsesForDate(today);
-    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    const { rows, dueOccasion } = await computeTodayStatus(config);
 
-    let dueOccasion = null;
-    for (const occasion of CONFIG.SURVEY_TIMES) {
-      const done = responses.some((r) => r.occasion === occasion);
-      const adjMin = adjustedTriggerMinute(toMinutes(occasion), wakeMin, sleepMin);
+    rows.forEach(({ occasion, state, adjMin }) => {
       const li = document.createElement("li");
       const label = document.createElement("span");
       label.textContent = OCCASION_LABELS[occasion] || occasion;
       const tag = document.createElement("span");
-      if (done) {
+      if (state === "done") {
         tag.className = "tag done"; tag.textContent = "Completed";
-      } else if (nowMin >= adjMin) {
+      } else if (state === "pending") {
         tag.className = "tag pending"; tag.textContent = "Available now";
-        if (!dueOccasion) dueOccasion = occasion;
       } else {
         tag.className = "tag waiting";
         const hh = String(Math.floor(adjMin / 60)).padStart(2, "0");
@@ -258,7 +297,7 @@ async function renderHome() {
       }
       li.appendChild(label); li.appendChild(tag);
       statusList.appendChild(li);
-    }
+    });
 
     if (dueOccasion) {
       takeSurveyBtn.classList.remove("hidden");

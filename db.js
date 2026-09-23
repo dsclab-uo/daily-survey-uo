@@ -95,6 +95,17 @@ const DB = {
     });
   },
 
+  async getAllResponses() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction("responses", "readonly");
+      const store = transaction.objectStore("responses");
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  },
+
   async getScheduleEntry(key) {
     return tx("schedule", "readonly", (store) => {
       return new Promise((resolve) => {
