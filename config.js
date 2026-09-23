@@ -5,7 +5,7 @@ const CONFIG = {
   // Paste the "Web app URL" you get after deploying apps-script.gs
   // (Deploy > New deployment > Web app). Looks like:
   // https://script.google.com/macros/s/AKfycb.../exec
-  SHEETS_WEBAPP_URL: "PASTE_YOUR_GOOGLE_APPS_SCRIPT_URL_HERE",
+  SHEETS_WEBAPP_URL: "https://script.google.com/macros/s/AKfycbxfZZSU9akWhO_kFQaQspYu9NvX3LJ0OYFvKcJ0THDeKz9XInqQCVGX6pRq0h2EXmmK/exec",
 
   // Total number of days the daily-survey period runs for.
   STUDY_LENGTH_DAYS: 30,
