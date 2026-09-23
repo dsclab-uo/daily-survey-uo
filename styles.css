@@ -28,7 +28,7 @@ html, body {
   padding: 20px 16px 40px;
 }
 
-.screen.hidden { display: none; }
+.hidden { display: none !important; }
 
 .card {
   background: #fff;
@@ -111,7 +111,6 @@ input[type="text"], input[type="time"] {
   font-size: 13px;
   margin-bottom: 14px;
 }
-.banner.hidden { display: none; }
 
 .status-block { margin-top: 8px; }
 .status-list { list-style: none; padding: 0; margin: 0; }
@@ -210,3 +209,21 @@ textarea, .other-input {
   margin-top: 10px;
 }
 .nav-row .btn-primary, .nav-row .btn-secondary { margin-top: 0; }
+.nav-row .btn-primary { flex: 2; }
+.nav-row .btn-secondary { flex: 1; }
+
+#installBanner {
+  max-width: 480px;
+  margin: 0 auto 12px;
+  padding: 12px 14px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 12px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+#installBanner span { flex: 1 1 200px; }
+#installBanner .btn-link { flex: 0 0 auto; }

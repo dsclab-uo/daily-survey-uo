@@ -7,6 +7,10 @@ const OCCASION_LABELS = { "12:00": "Midday survey", "20:00": "Evening survey" };
 let swRegistration = null;
 let currentOccasion = null; // occasion being answered on the survey screen
 let currentAnswers = {};
+let stepHistory = [];  // ordered list of question ids actually visited this survey
+let stepIndex = 0;     // pointer into stepHistory for the question currently shown
+let deferredInstallPrompt = null;
+const INSTALL_DISMISS_KEY = "installBannerDismissed";
 
 // ---------- small utils ----------
 function toMinutes(hhmm) {
@@ -61,6 +65,8 @@ async function init() {
     if (document.visibilityState === "visible") checkSchedule();
   });
 
+  setupInstallBanner();
+
   const config = await DB.getConfig();
   if (!config) {
     show("screen-setup");
@@ -114,6 +120,60 @@ function wireSetupScreen() {
     setInterval(checkSchedule, CONFIG.CHECK_INTERVAL_MS);
   });
 }
+
+// ============================================================
+// ADD-TO-HOME-SCREEN PROMPT
+// ============================================================
+function isStandaloneDisplay() {
+  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+function isIOSDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+}
+
+function setupInstallBanner() {
+  if (isStandaloneDisplay()) return; // already installed — nothing to prompt
+  if (localStorage.getItem(INSTALL_DISMISS_KEY) === "1") return;
+
+  const banner = document.getElementById("installBanner");
+  const textEl = document.getElementById("installBannerText");
+  const actionBtn = document.getElementById("btnInstallAction");
+  const dismissBtn = document.getElementById("btnDismissInstall");
+
+  dismissBtn.onclick = () => {
+    localStorage.setItem(INSTALL_DISMISS_KEY, "1");
+    banner.classList.add("hidden");
+  };
+
+  if (isIOSDevice()) {
+    // iOS has no programmatic install prompt — show instructions instead.
+    textEl.textContent = 'Add this app to your Home Screen for reminders to work: tap the Share icon, then "Add to Home Screen".';
+    actionBtn.classList.add("hidden");
+    banner.classList.remove("hidden");
+  } else {
+    // Chrome/Android etc. fire this event when the app is installable.
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      textEl.textContent = "Install this app to your home screen so reminders work reliably.";
+      actionBtn.classList.remove("hidden");
+      banner.classList.remove("hidden");
+      actionBtn.onclick = async () => {
+        banner.classList.add("hidden");
+        if (deferredInstallPrompt) {
+          deferredInstallPrompt.prompt();
+          await deferredInstallPrompt.userChoice;
+          deferredInstallPrompt = null;
+        }
+      };
+    });
+  }
+}
+
+window.addEventListener("appinstalled", () => {
+  document.getElementById("installBanner").classList.add("hidden");
+  localStorage.setItem(INSTALL_DISMISS_KEY, "1");
+});
 
 // ============================================================
 // HOME SCREEN
@@ -260,96 +320,142 @@ async function snoozeOccasion(dateStr, occasion) {
 window.snoozeOccasion = snoozeOccasion;
 
 // ============================================================
-// SURVEY SCREEN
+// SURVEY SCREEN — one question at a time, so skip logic can
+// actually take the participant off the page entirely.
 // ============================================================
 function startSurvey(occasion) {
   currentOccasion = occasion;
   currentAnswers = {};
-  renderSurveyForm();
+  stepHistory = ["q1"];
+  stepIndex = 0;
+  renderQuestionStep();
   show("screen-survey");
 }
 
-function renderSurveyForm() {
+// Given the id of the question just answered, figure out which
+// question comes next (honoring skipTo rules based on the answer given).
+function getNextId(fromId) {
+  const item = SURVEY_ITEMS.find((i) => i.id === fromId);
+  const idx = SURVEY_ITEMS.findIndex((i) => i.id === fromId);
+  if (item.skipTo) {
+    const ans = currentAnswers[fromId];
+    if (ans !== undefined && item.skipTo[ans]) return item.skipTo[ans];
+  }
+  return idx + 1 < SURVEY_ITEMS.length ? SURVEY_ITEMS[idx + 1].id : null;
+}
+
+function isStepAnswered(id) {
+  const item = SURVEY_ITEMS.find((i) => i.id === id);
+  const val = currentAnswers[id];
+  if (val === undefined || val === null || String(val).trim() === "") return false;
+  if (item.otherText && val === item.otherText) {
+    const otherVal = currentAnswers[id + "_other"];
+    if (!otherVal || !otherVal.trim()) return false;
+  }
+  return true;
+}
+
+// Rough progress estimate: total questions shrinks by 4 once we know
+// Q1 will skip Q2–Q5.
+function estimateTotalSteps() {
+  return currentAnswers["q1"] === "No" ? SURVEY_ITEMS.length - 4 : SURVEY_ITEMS.length;
+}
+
+function renderQuestionStep() {
+  const id = stepHistory[stepIndex];
+  const item = SURVEY_ITEMS.find((i) => i.id === id);
   const form = document.getElementById("surveyForm");
   form.innerHTML = "";
 
-  SURVEY_ITEMS.forEach((item) => {
-    const wrapper = document.createElement("div");
-    wrapper.className = "question";
-    wrapper.dataset.qid = item.id;
+  const wrapper = document.createElement("div");
+  wrapper.className = "question";
+  wrapper.dataset.qid = item.id;
 
-    const p = document.createElement("p");
-    p.className = "qtext";
-    p.textContent = item.text;
-    wrapper.appendChild(p);
+  const p = document.createElement("p");
+  p.className = "qtext";
+  p.textContent = item.text;
+  wrapper.appendChild(p);
 
-    if (item.type === "single_choice") {
-      item.options.forEach((opt) => {
-        const row = document.createElement("label");
-        row.className = "option-row";
-        row.innerHTML = `<input type="radio" name="${item.id}" value="${opt}"> <span>${opt}</span>`;
-        row.querySelector("input").addEventListener("change", () => {
-          wrapper.querySelectorAll(".option-row").forEach((r) => r.classList.remove("selected"));
-          row.classList.add("selected");
-          currentAnswers[item.id] = opt;
-          applySkipLogic();
-          if (item.otherText === opt) {
-            showOtherInput(wrapper, item);
-          } else {
-            const existingOther = wrapper.querySelector(".other-input");
-            if (existingOther) existingOther.remove();
-          }
-          updateSubmitState();
-        });
-        wrapper.appendChild(row);
+  if (item.type === "single_choice") {
+    item.options.forEach((opt) => {
+      const row = document.createElement("label");
+      row.className = "option-row" + (currentAnswers[id] === opt ? " selected" : "");
+      row.innerHTML = `<input type="radio" name="${item.id}" value="${opt}" ${currentAnswers[id] === opt ? "checked" : ""}> <span>${opt}</span>`;
+      row.querySelector("input").addEventListener("change", () => {
+        wrapper.querySelectorAll(".option-row").forEach((r) => r.classList.remove("selected"));
+        row.classList.add("selected");
+        currentAnswers[item.id] = opt;
+        if (item.otherText === opt) {
+          showOtherInput(wrapper, item);
+        } else {
+          const existingOther = wrapper.querySelector(".other-input");
+          if (existingOther) existingOther.remove();
+          delete currentAnswers[item.id + "_other"];
+        }
+        refreshNavState();
       });
-    } else if (item.type === "scale_1_7") {
-      const row = document.createElement("div");
-      row.className = "scale-row";
-      for (let i = 1; i <= 7; i++) {
-        const btn = document.createElement("div");
-        btn.className = "scale-btn";
-        btn.textContent = i;
-        btn.addEventListener("click", () => {
-          row.querySelectorAll(".scale-btn").forEach((b) => b.classList.remove("selected"));
-          btn.classList.add("selected");
-          currentAnswers[item.id] = i;
-          updateSubmitState();
-        });
-        row.appendChild(btn);
-      }
       wrapper.appendChild(row);
-      const labels = document.createElement("div");
-      labels.className = "scale-labels";
-      labels.innerHTML = `<span>${item.lowLabel}</span><span>${item.highLabel}</span>`;
-      wrapper.appendChild(labels);
-    } else if (item.type === "open_text") {
-      const ta = document.createElement("textarea");
-      ta.placeholder = "Type your answer…";
-      ta.addEventListener("input", () => {
-        currentAnswers[item.id] = ta.value;
-        updateSubmitState();
-      });
-      wrapper.appendChild(ta);
+    });
+    if (item.otherText && currentAnswers[id] === item.otherText) {
+      showOtherInput(wrapper, item);
     }
+  } else if (item.type === "scale_1_7") {
+    const row = document.createElement("div");
+    row.className = "scale-row";
+    for (let i = 1; i <= 7; i++) {
+      const btn = document.createElement("div");
+      btn.className = "scale-btn" + (currentAnswers[id] === i ? " selected" : "");
+      btn.textContent = i;
+      btn.addEventListener("click", () => {
+        row.querySelectorAll(".scale-btn").forEach((b) => b.classList.remove("selected"));
+        btn.classList.add("selected");
+        currentAnswers[item.id] = i;
+        refreshNavState();
+      });
+      row.appendChild(btn);
+    }
+    wrapper.appendChild(row);
+    const labels = document.createElement("div");
+    labels.className = "scale-labels";
+    labels.innerHTML = `<span>${item.lowLabel}</span><span>${item.highLabel}</span>`;
+    wrapper.appendChild(labels);
+  } else if (item.type === "open_text") {
+    const ta = document.createElement("textarea");
+    ta.placeholder = "Type your answer…";
+    ta.value = currentAnswers[id] || "";
+    ta.addEventListener("input", () => {
+      currentAnswers[item.id] = ta.value;
+      refreshNavState();
+    });
+    wrapper.appendChild(ta);
+  }
 
-    form.appendChild(wrapper);
-  });
+  form.appendChild(wrapper);
 
   const navRow = document.createElement("div");
   navRow.className = "nav-row";
-  const submitBtn = document.createElement("button");
-  submitBtn.type = "button";
-  submitBtn.id = "btnSubmitSurvey";
-  submitBtn.className = "btn-primary";
-  submitBtn.textContent = "Submit";
-  submitBtn.disabled = true;
-  submitBtn.addEventListener("click", submitSurvey);
-  navRow.appendChild(submitBtn);
+
+  if (stepIndex > 0) {
+    const backBtn = document.createElement("button");
+    backBtn.type = "button";
+    backBtn.className = "btn-secondary";
+    backBtn.textContent = "Back";
+    backBtn.addEventListener("click", handleBack);
+    navRow.appendChild(backBtn);
+  }
+
+  const nextBtn = document.createElement("button");
+  nextBtn.type = "button";
+  nextBtn.id = "btnNextStep";
+  nextBtn.className = "btn-primary";
+  nextBtn.textContent = getNextId(id) === null ? "Submit" : "Next";
+  nextBtn.disabled = !isStepAnswered(id);
+  nextBtn.addEventListener("click", () => handleNext(id));
+  navRow.appendChild(nextBtn);
+
   form.appendChild(navRow);
 
-  applySkipLogic();
-  updateSubmitState();
+  updateProgressBar();
 }
 
 function showOtherInput(wrapper, item) {
@@ -358,50 +464,52 @@ function showOtherInput(wrapper, item) {
     ta = document.createElement("textarea");
     ta.className = "other-input";
     ta.placeholder = "Please specify…";
+    ta.value = currentAnswers[item.id + "_other"] || "";
     ta.addEventListener("input", () => {
       currentAnswers[item.id + "_other"] = ta.value;
-      updateSubmitState();
+      refreshNavState();
     });
     wrapper.appendChild(ta);
   }
 }
 
-function applySkipLogic() {
-  // Q1 -> No skips Q2-Q5
-  const q1Answer = currentAnswers["q1"];
-  const skipIds = ["q2", "q3", "q4", "q5"];
-  const shouldSkip = q1Answer === "No";
-  skipIds.forEach((id) => {
-    const el = document.querySelector(`.question[data-qid="${id}"]`);
-    if (!el) return;
-    el.classList.toggle("hidden", shouldSkip);
-    if (shouldSkip) delete currentAnswers[id];
-  });
+function refreshNavState() {
+  const id = stepHistory[stepIndex];
+  const nextBtn = document.getElementById("btnNextStep");
+  if (nextBtn) {
+    nextBtn.disabled = !isStepAnswered(id);
+    nextBtn.textContent = getNextId(id) === null ? "Submit" : "Next";
+  }
+  updateProgressBar();
 }
 
-function visibleRequiredIds() {
-  return SURVEY_ITEMS
-    .map((i) => i.id)
-    .filter((id) => {
-      const el = document.querySelector(`.question[data-qid="${id}"]`);
-      return el && !el.classList.contains("hidden");
-    });
-}
-
-function updateSubmitState() {
-  const btn = document.getElementById("btnSubmitSurvey");
-  if (!btn) return;
-  const requiredIds = visibleRequiredIds();
-  const allAnswered = requiredIds.every((id) => {
-    const val = currentAnswers[id];
-    return val !== undefined && val !== null && String(val).trim() !== "";
-  });
-  btn.disabled = !allAnswered;
-
-  const total = requiredIds.length;
-  const answered = requiredIds.filter((id) => currentAnswers[id] !== undefined).length;
+function updateProgressBar() {
   const fill = document.getElementById("progressFill");
-  if (fill) fill.style.width = `${total ? Math.round((answered / total) * 100) : 0}%`;
+  if (!fill) return;
+  const total = estimateTotalSteps();
+  const pct = total ? Math.min(100, Math.round(((stepIndex + 1) / total) * 100)) : 0;
+  fill.style.width = `${pct}%`;
+}
+
+function handleNext(fromId) {
+  const nextId = getNextId(fromId);
+  // Truncate any forward history beyond this point — if the participant
+  // went back and changed an earlier answer, the old branch no longer applies.
+  stepHistory = stepHistory.slice(0, stepIndex + 1);
+  if (nextId) {
+    stepHistory.push(nextId);
+    stepIndex++;
+    renderQuestionStep();
+  } else {
+    submitSurvey();
+  }
+}
+
+function handleBack() {
+  if (stepIndex > 0) {
+    stepIndex--;
+    renderQuestionStep();
+  }
 }
 
 async function submitSurvey() {
