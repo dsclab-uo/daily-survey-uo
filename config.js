@@ -5,13 +5,13 @@ const CONFIG = {
   // Paste the "Web app URL" you get after deploying apps-script.gs
   // (Deploy > New deployment > Web app). Looks like:
   // https://script.google.com/macros/s/AKfycb.../exec
-  SHEETS_WEBAPP_URL: "PASTE_YOUR_GOOGLE_APPS_SCRIPT_URL_HERE",
+  SHEETS_WEBAPP_URL: "https://script.google.com/macros/s/AKfycbxfZZSU9akWhO_kFQaQspYu9NvX3LJ0OYFvKcJ0THDeKz9XInqQCVGX6pRq0h2EXmmK/exec",
 
   // For background/closed-app push notifications (optional but recommended —
   // see /push-server/README.md). Leave PUSH_SERVER_URL blank to skip push
   // entirely and rely only on notifications firing while the app is open.
-  PUSH_SERVER_URL: "",              // e.g. "https://your-app.onrender.com"
-  PUSH_VAPID_PUBLIC_KEY: "",        // printed by `npm run generate-keys` on the server
+  PUSH_SERVER_URL: "daily-survey-uo-production.up.railway.app",              // e.g. "https://your-app.onrender.com"
+  PUSH_VAPID_PUBLIC_KEY: "BBYpuB0L410aDZfJ6TgxVHDXklNyACdajENQZyViyqY4UB8DSKoZFP8SMt6dABVfTVWH-1lGq1zw9ZkAqFf92j8",        // printed by `npm run generate-keys` on the server
 
   // Total number of days the daily-survey period runs for.
   STUDY_LENGTH_DAYS: 30,
