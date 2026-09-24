@@ -6,6 +6,10 @@ times, and get prompted twice a day (noon and 8pm local time) to complete
 a short survey. Responses are stored on-device and synced to a Google
 Sheet whenever the phone is online.
 
+This client works standalone (notifications while the app is open), or
+paired with the sibling `/push-server/` folder for background/closed-app
+notifications — see that folder's README for setup.
+
 ## What's in this folder
 
 | File | Purpose |
@@ -14,7 +18,7 @@ Sheet whenever the phone is online.
 | `styles.css` | Styling |
 | `app.js` | App logic: setup, scheduling, survey rendering, sync |
 | `db.js` | IndexedDB wrapper (local storage) |
-| `config.js` | **Edit this** — your Sheets URL, study length, survey times |
+| `config.js` | **Edit this** — your Sheets URL, push server URL/key, study length, survey times |
 | `survey-items.js` | The 12 survey questions, with the Q1→Q6 skip logic |
 | `service-worker.js` | Offline caching + notification click/snooze handling |
 | `manifest.json` | Makes the app installable on Android/iOS home screens |
@@ -72,38 +76,36 @@ On first launch, the app asks for the participant ID and usual wake/sleep
 times, then asks for notification permission — participants should tap
 **Allow**.
 
-## Important: notification behavior differs by platform
+## Notification delivery: local-only vs. push server
 
-- **While the app is open or was recently used**, both platforms fire
-  notifications reliably and on time, including snooze reminders.
-- **Android (installed, Chrome):** can often still check and fire
-  notifications in the background via a best-effort "periodic background
-  sync" registration, though Chrome/Android ultimately decides when that
-  runs based on how often the participant uses the app.
-- **iOS Safari does not support any form of background scheduling for
-  installed web apps.** There is no way for a plain web app to guarantee
-  a notification fires at exactly noon or 8pm if the app hasn't been
-  opened recently — this is a platform restriction, not a bug. What the
-  app *does* do on iOS:
-  - The moment the app is opened or brought to the foreground, it
-    immediately checks whether a survey is due and fires the
-    notification/reminder right then, so nothing is silently missed for
-    long.
-  - If you need guaranteed-timed alerts on iOS even when the app is
-    fully closed, the only real fix is **server-triggered push
-    notifications** (Apple Push Notification service via Web Push,
-    supported on iOS 16.4+ for home-screen-installed PWAs). That
-    requires a small always-on backend (e.g. a scheduled Cloud Function)
-    that sends a push at noon/8pm to each participant's device — this is
-    a meaningful additional piece of infrastructure beyond what's in
-    this folder. Happy to help build that out if reliable iOS
-    background delivery turns out to be a hard requirement for your
-    study.
+Out of the box (no `PUSH_SERVER_URL` set in `config.js`), notifications
+only fire while a participant's app is open or was recently in the
+foreground — closing the app stops the schedule check entirely, since
+that check is just JavaScript running in the page.
 
-In practice, many studies using in-browser PWAs manage this by asking
-participants to keep notifications enabled and simply open the app once
-in a while; combined with the "fires immediately on open" behavior above,
-this keeps missed prompts to a minimum on iOS.
+**For background/closed-app delivery, deploy `/push-server/` (see its
+own README)** and set `PUSH_SERVER_URL` / `PUSH_VAPID_PUBLIC_KEY` in
+this folder's `config.js`. Once that's done:
+
+- **Android (Chrome):** background push works reliably regardless of
+  whether the app is installed to the home screen.
+- **iOS Safari:** background push works too, but **only if the
+  participant has added the app to their home screen** (Share → Add to
+  Home Screen) — a plain Safari tab can never receive push on iOS, no
+  matter what's configured server-side. This is an Apple platform
+  restriction, not something fixable in code.
+
+Either way, the app's own in-page schedule check (described above)
+keeps running as a second layer — if the app happens to be open, it
+fires immediately rather than waiting on the server's once-a-minute
+check, and notification tags are shared between the two so they don't
+stack as duplicates.
+
+If you don't deploy the push server, iOS and Android both still behave
+as before: the moment the app is opened, it immediately checks whether
+a survey is due and fires the notification/reminder right then, so
+nothing sits silently missed for long — participants just need to open
+the app periodically for that to happen.
 
 ## Data & offline behavior
 
@@ -121,6 +123,10 @@ this keeps missed prompts to a minimum on iOS.
 - To test scheduling quickly, temporarily change `SURVEY_TIMES` in
   `config.js` to a time a minute or two in the future, reload, and watch
   for the notification.
+- If you've set up the push server, you can skip waiting entirely by
+  calling its `/api/debug/tick` endpoint (see `/push-server/README.md`)
+  to force an immediate check — useful for confirming a closed-app push
+  actually arrives.
 - Use your browser's DevTools → Application → Service Workers panel to
   confirm the service worker registered, and → IndexedDB to inspect
   stored config/responses/schedule.

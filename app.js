@@ -97,6 +97,7 @@ async function init() {
     checkSchedule();
     setInterval(checkSchedule, CONFIG.CHECK_INTERVAL_MS);
     syncPendingResponses();
+    subscribeToPush(); // re-affirm the subscription each launch; cheap no-op if already current
   }
 }
 
@@ -133,6 +134,7 @@ function wireSetupScreen() {
     if ("Notification" in window && Notification.permission === "default") {
       try { await Notification.requestPermission(); } catch (e) {}
     }
+    subscribeToPush(); // best-effort; falls back to app-open-only notifications if this fails
 
     setInterval(checkSchedule, CONFIG.CHECK_INTERVAL_MS);
 
@@ -313,6 +315,7 @@ async function renderHome() {
     banner.classList.remove("hidden");
     document.getElementById("btnEnableNotif").onclick = async () => {
       await Notification.requestPermission();
+      subscribeToPush();
       renderHome();
     };
   } else {
@@ -361,16 +364,85 @@ async function checkSchedule() {
   renderHome();
 }
 
+// ============================================================
+// PUSH SUBSCRIPTION — lets the server send notifications even when
+// the app is fully closed. Optional: skipped if PUSH_SERVER_URL /
+// PUSH_VAPID_PUBLIC_KEY aren't set in config.js, or if the browser
+// doesn't support Push (in which case local-only scheduling above
+// still covers the "app is open" case).
+// ============================================================
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+async function subscribeToPush() {
+  if (!CONFIG.PUSH_SERVER_URL || !CONFIG.PUSH_VAPID_PUBLIC_KEY) return;
+  if (!swRegistration || !("pushManager" in swRegistration)) return;
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+  try {
+    let subscription = await swRegistration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await swRegistration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(CONFIG.PUSH_VAPID_PUBLIC_KEY)
+      });
+    }
+
+    const config = await DB.getConfig();
+    if (!config) return;
+
+    await fetch(`${CONFIG.PUSH_SERVER_URL}/api/subscribe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        participantId: config.participantId,
+        subscription,
+        wakeTime: config.wakeTime,
+        sleepTime: config.sleepTime,
+        startDate: config.startDate,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      })
+    });
+  } catch (e) {
+    console.warn("Push subscription failed (notifications will still work while the app is open):", e);
+  }
+}
+
+// Best-effort notice to the push server that an occasion is done, so it
+// stops sending reminders for it. Safe to call even if push isn't set up.
+async function notifyServerComplete(date, occasion) {
+  if (!CONFIG.PUSH_SERVER_URL) return;
+  try {
+    const config = await DB.getConfig();
+    if (!config) return;
+    await fetch(`${CONFIG.PUSH_SERVER_URL}/api/complete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ participantId: config.participantId, date, occasion })
+    });
+  } catch (e) {
+    // offline or server unreachable — the client's own schedule entry
+    // already stops local reminders; this only affects server-side push.
+  }
+}
+
 async function fireNotification(occasion, dateStr, isReminder) {
   const title = isReminder ? "Reminder: Daily survey" : "Time for your daily survey";
   const body = `${OCCASION_LABELS[occasion] || occasion} — tap to complete it now.`;
+  const config = await DB.getConfig();
   const options = {
     body,
     tag: `survey-${dateStr}-${occasion}`,
     renotify: true,
     icon: "icons/icon-192.png",
     badge: "icons/icon-192.png",
-    data: { occasion, date: dateStr },
+    data: { occasion, date: dateStr, participantId: config && config.participantId },
     actions: [
       { action: "take", title: "Take survey" },
       { action: "snooze", title: "Snooze 1 hr" }
@@ -617,6 +689,7 @@ async function submitSurvey() {
   };
 
   syncPendingResponses();
+  notifyServerComplete(record.date, currentOccasion);
 }
 
 // ============================================================
